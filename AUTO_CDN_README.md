@@ -251,22 +251,21 @@ flutter build apk --release --no-pub --build-name=2.2.1 --build-number=2
 
 **结论：需要 fork 到自己的仓库，并用 `git rebase` 把自己的提交持续叠在上游最新代码上。** 不建议每次手动复制补丁，也不建议 merge（会产生大量合并提交、冲突更难处理）。
 
-### 一次性搭建
+### 当前状态（已就绪）
+
+- Fork：<https://github.com/Evilk9088/PiliPlus>
+- 功能分支：`feat/auto-cdn`，提交 `2d3b7fb feat: 自动 CDN 测速选优与卡顿换线`
+- 本地 `origin` → fork，`upstream` → `bggRGjQaUbCoE/PiliPlus`，两者 fetch refspec 均为标准 `+refs/heads/*:refs/remotes/*`
+- 私钥 `android/app/piliplus-release.jks` 与 `android/key.properties` **不在仓库里**（被 `.gitignore` 忽略），换机器需手动拷回
+
+若要在另一台机器上从零搭建：
 
 ```bash
-# 1. 在 GitHub 上 Fork：https://github.com/bggRGjQaUbCoE/PiliPlus -> 你的账号/PiliPlus
-# 2. 本地克隆自己的 fork
-git clone https://github.com/<你的用户名>/PiliPlus.git PiliPlus
+git clone https://github.com/Evilk9088/PiliPlus.git PiliPlus
 cd PiliPlus
-
-# 3. 添加上游 remote
 git remote add upstream https://github.com/bggRGjQaUbCoE/PiliPlus.git
-
-# 4. 建一个功能分支，把补丁应用成一个提交
-git checkout -b feat/auto-cdn
-# 复制改动文件 / git apply auto_cdn.patch
-git add -A && git commit -m "feat: 自动 CDN 测速选优与卡顿换线"
-git push -u origin feat/auto-cdn
+git checkout feat/auto-cdn
+# 拷回 android/app/piliplus-release.jks 与 android/key.properties
 ```
 
 ### 每次上游更新后

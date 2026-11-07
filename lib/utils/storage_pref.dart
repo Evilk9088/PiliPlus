@@ -458,6 +458,14 @@ abstract final class Pref {
   static bool get cdnSpeedTest =>
       _setting.get(SettingBoxKey.cdnSpeedTest, defaultValue: true);
 
+  /// 启动时自动测速并切换到最快 CDN
+  static bool get autoCdn =>
+      _setting.get(SettingBoxKey.autoCdn, defaultValue: false);
+
+  /// 播放卡顿时自动切换其它 CDN 线路
+  static bool get autoCdnStallSwitch =>
+      _setting.get(SettingBoxKey.autoCdnStallSwitch, defaultValue: false);
+
   static bool get autoUpdate =>
       _setting.get(SettingBoxKey.autoUpdate, defaultValue: true);
 

@@ -22,6 +22,7 @@ import 'package:PiliPlus/models/common/sponsor_block/post_segment_model.dart';
 import 'package:PiliPlus/models/common/sponsor_block/segment_model.dart';
 import 'package:PiliPlus/models/common/sponsor_block/segment_type.dart';
 import 'package:PiliPlus/models/common/video/base_quality.dart';
+import 'package:PiliPlus/models/common/video/cdn_type.dart';
 import 'package:PiliPlus/models/common/video/source_type.dart';
 import 'package:PiliPlus/models/common/video/video_decode_type.dart';
 import 'package:PiliPlus/models/common/video/video_type.dart';
@@ -52,6 +53,7 @@ import 'package:PiliPlus/plugin/pl_player/models/heart_beat_type.dart';
 import 'package:PiliPlus/plugin/pl_player/models/play_status.dart';
 import 'package:PiliPlus/services/download/download_service.dart';
 import 'package:PiliPlus/utils/accounts.dart';
+import 'package:PiliPlus/utils/cdn_auto_manager.dart';
 import 'package:PiliPlus/utils/connectivity_utils.dart';
 import 'package:PiliPlus/utils/extension/context_ext.dart';
 import 'package:PiliPlus/utils/extension/nested_scroll_ext.dart';
@@ -161,6 +163,170 @@ class VideoDetailController extends GetxController
   late final headerCtrKey = GlobalKey<TimeBatteryMixin>();
 
   Box setting = GStorage.setting;
+
+  // ---------------- 自动 CDN：卡顿自动换线 ----------------
+  StreamSubscription<bool>? _cdnBufferingSub;
+  Timer? _cdnStallTimer;
+  final Set<CDNService> _cdnTried = <CDNService>{};
+  DateTime? _cdnLastSwitch;
+  bool _cdnSwitching = false;
+
+  /// 连续缓冲超过该时长判定为卡顿。
+  static const Duration _cdnStallThreshold = Duration(seconds: 4);
+
+  /// 两次换线的最小间隔，防止抖动时反复重载。
+  static const Duration _cdnSwitchCooldown = Duration(seconds: 20);
+
+  /// 一次播放会话内最多自动换线次数。
+  static const int _cdnMaxSwitchPerSession = 3;
+
+  int _cdnSwitchCount = 0;
+
+  void _initCdnStallWatcher() {
+    if (isFileSource || !CdnAutoManager.autoCdnStallSwitchEnabled) return;
+    _cdnBufferingSub = plPlayerController.isBuffering.listen((buffering) {
+      if (buffering) {
+        _onCdnBufferingStart();
+      } else {
+        _cdnStallTimer?.cancel();
+        _cdnStallTimer = null;
+      }
+    });
+  }
+
+  void _onCdnBufferingStart() {
+    if (_cdnSwitching ||
+        _cdnSwitchCount >= _cdnMaxSwitchPerSession ||
+        plPlayerController.isLive ||
+        plPlayerController.playerStatus.isCompleted) {
+      return;
+    }
+    final now = DateTime.now();
+    if (_cdnLastSwitch != null &&
+        now.difference(_cdnLastSwitch!) < _cdnSwitchCooldown) {
+      return;
+    }
+    _cdnStallTimer?.cancel();
+    _cdnStallTimer = Timer(_cdnStallThreshold, () {
+      if (isClosed || _cdnSwitching) return;
+      if (plPlayerController.isBuffering.value) {
+        _switchCdnOnStall();
+      }
+    });
+  }
+
+  Future<void> _switchCdnOnStall() async {
+    if (_cdnSwitching || isClosed) return;
+    final current = VideoUtils.cdnService;
+    _cdnTried.add(current);
+    if (!CdnAutoManager.switchToNext(current: current, tried: _cdnTried)) {
+      _showCdnToast('已尝试所有可用线路，仍持续缓冲');
+      return;
+    }
+
+    _cdnSwitching = true;
+    _cdnSwitchCount++;
+    _cdnLastSwitch = DateTime.now();
+    final target = VideoUtils.cdnService;
+    _showCdnToast('卡顿，自动切换线路 → ${target.desc}');
+
+    try {
+      final video = _rebuildVideoUrl(target);
+      final audio = _rebuildAudioUrl(target);
+      if (video == null) {
+        _showCdnToast('当前视频不支持替换该线路');
+        return;
+      }
+      // 该视频的链接无法替换 host 时，换线没有实际意义。
+      if (!CdnAutoManager.isCdnUrlValid(video, target)) {
+        _showCdnToast('当前视频链接不支持切换线路');
+        CdnAutoManager.restoreAutoCdn(current);
+        return;
+      }
+      final resume = plPlayerController.videoPlayerController?.state.position;
+      await plPlayerController.setDataSource(
+        NetworkSource(videoSource: video, audioSource: audio),
+        autoplay: true,
+        seekTo: resume,
+        duration: data.timeLength == null
+            ? null
+            : Duration(milliseconds: data.timeLength!),
+        isVertical: isVertical.value,
+        aid: aid,
+        bvid: bvid,
+        cid: cid.value,
+        epid: isUgc ? null : epId,
+        seasonId: isUgc ? null : seasonId,
+        pgcType: isUgc ? null : pgcType,
+        videoType: videoType,
+        width: firstVideo.width,
+        height: firstVideo.height,
+        volume: volume,
+        rotate: _rotate,
+      );
+    } catch (e) {
+      if (kDebugMode) debugPrint('[CDN自动] 换线重载失败：$e');
+      _showCdnToast('切换线路失败，已保持原线路');
+    } finally {
+      _cdnSwitching = false;
+    }
+  }
+
+  String? _rebuildVideoUrl(CDNService service) {
+    final dash = data.dash;
+    final video = dash?.video;
+    if (video != null && video.isNotEmpty) {
+      return VideoUtils.getCdnUrl(
+        firstVideo.playUrls,
+        defaultCDNService: service,
+      );
+    }
+    final durl = data.durl;
+    if (durl != null && durl.isNotEmpty) {
+      if (durl.length > 1) {
+        final sb = StringBuffer('edl://!no_chapters;');
+        for (final i in durl) {
+          final url = VideoUtils.getCdnUrl(
+            i.playUrls,
+            defaultCDNService: service,
+          );
+          sb.write('%${url.length}%$url,length=${i.length! / 1000};');
+        }
+        return sb.toString();
+      }
+      return VideoUtils.getCdnUrl(
+        durl.single.playUrls,
+        defaultCDNService: service,
+      );
+    }
+    return null;
+  }
+
+  String? _rebuildAudioUrl(CDNService service) {
+    final audio = data.dash?.audio;
+    if (audio != null && audio.isNotEmpty) {
+      return VideoUtils.getCdnUrl(
+        audio.first.playUrls,
+        defaultCDNService: service,
+        isAudio: true,
+      );
+    }
+    return '';
+  }
+
+  void _showCdnToast(String message) {
+    CdnAutoManager.showToast(message);
+  }
+
+  /// 切换分 P / 新视频时重置换线状态。
+  void _resetCdnStallState() {
+    _cdnTried.clear();
+    _cdnSwitchCount = 0;
+    _cdnLastSwitch = null;
+    _cdnStallTimer?.cancel();
+    _cdnStallTimer = null;
+  }
+  // -------------------------------------------------------
 
   // 预设的解码格式
   late List<VideoDecodeFormatType> preferCodecs = Pref.preferCodecs;
@@ -410,6 +576,8 @@ class VideoDetailController extends GetxController
           ? 1
           : 0,
     );
+
+    _initCdnStallWatcher();
   }
 
   Future<void> getMediaList({
@@ -1240,6 +1408,10 @@ class VideoDetailController extends GetxController
   @override
   void onClose() {
     cid.close();
+    _cdnBufferingSub?.cancel();
+    _cdnBufferingSub = null;
+    _cdnStallTimer?.cancel();
+    _cdnStallTimer = null;
     if (isFileSource) {
       cacheLocalProgress();
     }
@@ -1264,6 +1436,7 @@ class VideoDetailController extends GetxController
     defaultST = null;
     videoUrl = null;
     audioUrl = null;
+    _resetCdnStallState();
 
     // danmaku
     savedDanmaku = null;

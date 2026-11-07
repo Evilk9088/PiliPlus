@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:PiliPlus/build_config.dart';
 import 'package:PiliPlus/common/constants.dart';
+import 'package:PiliPlus/utils/cdn_auto_manager.dart';
 import 'package:PiliPlus/common/widgets/back_detector.dart';
 import 'package:PiliPlus/common/widgets/custom_toast.dart';
 import 'package:PiliPlus/common/widgets/route_aware_mixin.dart';
@@ -35,6 +36,7 @@ import 'package:PiliPlus/utils/theme_utils.dart';
 import 'package:PiliPlus/utils/utils.dart';
 import 'package:catcher_2/catcher_2.dart';
 import 'package:collection/collection.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dynamic_color/dynamic_color.dart' show DynamicColorPlugin;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -137,6 +139,20 @@ void main() async {
   Request();
   Request.setCookie();
   RequestUtils.syncHistoryStatus();
+
+  // 自动 CDN：恢复上次测速排名；测速安排在首帧渲染完成后再开始，
+  // 避免与启动/首页加载抢网络与 CPU。全部异常保护，失败不阻塞启动。
+  try {
+    CdnAutoManager.restoreRanking();
+    Connectivity()
+        .onConnectivityChanged
+        .listen((_) => CdnAutoManager.onConnectivityChanged());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      CdnAutoManager.init();
+    });
+  } catch (e) {
+    if (kDebugMode) debugPrint('[CDN自动] 初始化失败：$e');
+  }
 
   SmartDialog.config.toast = SmartConfigToast(displayType: .onlyRefresh);
 

@@ -4,6 +4,7 @@ import 'package:PiliPlus/models/common/video/base_quality.dart';
 import 'package:PiliPlus/models/common/video/cdn_type.dart';
 import 'package:PiliPlus/models/common/video/video_decode_type.dart';
 import 'package:PiliPlus/pages/setting/models/model.dart';
+import 'package:PiliPlus/utils/cdn_auto_manager.dart';
 import 'package:PiliPlus/pages/setting/widgets/ordered_multi_select_dialog.dart';
 import 'package:PiliPlus/pages/setting/widgets/select_dialog.dart';
 import 'package:PiliPlus/plugin/pl_player/models/audio_output_type.dart';
@@ -57,8 +58,35 @@ List<SettingsModel> get videoSettings => [
     title: 'CDN 设置',
     leading: const Icon(MdiIcons.cloudPlusOutline),
     getSubtitle: () =>
-        '当前使用：${VideoUtils.cdnService.desc}，部分 CDN 可能失效，如无法播放请尝试切换',
+        '当前使用：${VideoUtils.cdnService.desc}${VideoUtils.autoCdnSelected ? "（自动）" : ""}，点开自动测速并按速度排序',
     onTap: _showCDNDialog,
+  ),
+  SwitchModel(
+    title: '启动自动测速并切换最优 CDN',
+    subtitle: 'APP 首帧渲染完成后并行测速，自动选用最快线路；测速会消耗流量',
+    leading: const Icon(Icons.speed),
+    setKey: SettingBoxKey.autoCdn,
+    defaultVal: false,
+    onChanged: (value) {
+      if (value) CdnAutoManager.testNow();
+    },
+  ),
+  const SwitchModel(
+    title: '卡顿自动切换线路',
+    subtitle: '播放中连续缓冲超过 4 秒时，自动切换到其它 CDN 线路并保持播放进度；开关对新打开的播放页生效',
+    leading: Icon(Icons.swap_horiz),
+    setKey: SettingBoxKey.autoCdnStallSwitch,
+    defaultVal: false,
+  ),
+  NormalModel(
+    title: '立即测速并切换线路',
+    leading: const Icon(Icons.refresh),
+    getSubtitle: () => CdnAutoManager.rankingSummary,
+    onTap: (context, setState) async {
+      SmartDialog.showToast('正在并行测速，请稍候...');
+      await CdnAutoManager.testNow();
+      setState();
+    },
   ),
   NormalModel(
     title: '直播 CDN 设置',
@@ -69,7 +97,7 @@ List<SettingsModel> get videoSettings => [
   const SwitchModel(
     title: 'CDN 测速',
     leading: Icon(Icons.speed),
-    subtitle: '测速通过模拟加载视频实现，注意流量消耗，结果仅供参考',
+    subtitle: '保留项：打开 CDN 选择列表时总是自动测速并按速度排序（并行、单节点 10MB）',
     setKey: SettingBoxKey.cdnSpeedTest,
     defaultVal: true,
   ),
@@ -197,8 +225,7 @@ Future<void> _showCDNDialog(BuildContext context, VoidCallback setState) async {
     builder: (context) => const CdnSelectDialog(),
   );
   if (res != null) {
-    VideoUtils.cdnService = res;
-    await GStorage.setting.put(SettingBoxKey.CDNService, res.name);
+    await CdnAutoManager.setManualCdn(res);
     setState();
   }
 }

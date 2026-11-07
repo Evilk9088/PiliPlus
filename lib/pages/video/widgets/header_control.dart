@@ -42,6 +42,7 @@ import 'package:PiliPlus/services/shutdown_timer_service.dart'
     show shutdownTimerService, ShutdownPanel;
 import 'package:PiliPlus/utils/accounts.dart';
 import 'package:PiliPlus/utils/accounts/account.dart';
+import 'package:PiliPlus/utils/cdn_auto_manager.dart';
 import 'package:PiliPlus/utils/android/android_helper.dart';
 import 'package:PiliPlus/utils/connectivity_utils.dart';
 import 'package:PiliPlus/utils/extension/num_ext.dart';
@@ -515,20 +516,17 @@ class HeaderControlState extends State<HeaderControl>
                     title: const Text('CDN 设置', style: titleStyle),
                     leading: const Icon(MdiIcons.cloudPlusOutline, size: 20),
                     subtitle: Text(
-                      '当前：${VideoUtils.cdnService.desc}，无法播放请切换',
+                      '当前：${VideoUtils.cdnService.desc}${VideoUtils.autoCdnSelected ? "（自动）" : ""}，点击测速并按速度选线路',
                       style: subTitleStyle,
                     ),
                     onTap: () async {
                       Get.back();
                       final result = await showDialog<CDNService>(
                         context: context,
-                        builder: (context) => CdnSelectDialog(
-                          sample: videoInfo.dash?.video?.firstOrNull,
-                        ),
+                        builder: (context) => const CdnSelectDialog(),
                       );
                       if (result != null) {
-                        VideoUtils.cdnService = result;
-                        setting.put(SettingBoxKey.CDNService, result.name);
+                        await CdnAutoManager.setManualCdn(result);
                         SmartDialog.showToast('已设置为 ${result.desc}，正在重载视频');
                         videoDetailCtr.queryVideoUrl(fromReset: true);
                       }

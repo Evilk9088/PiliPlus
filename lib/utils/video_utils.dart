@@ -13,6 +13,9 @@ abstract final class VideoUtils {
   static String? liveCdnUrl = Pref.liveCdnUrl;
   static bool disableAudioCDN = Pref.disableAudioCDN;
 
+  /// 当前 CDN 是否由自动测速/自动换线选出（用于 UI 展示与判断）。
+  static bool autoCdnSelected = false;
+
   static const _proxyTf = 'proxy-tf-all-ws.bilivideo.com';
 
   static final _mirrorRegex = RegExp(
